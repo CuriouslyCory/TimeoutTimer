@@ -2,6 +2,7 @@
 #include <ESP8266WiFi.h>
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
+#include <WiFiManager.h>         // https://github.com/tzapu/WiFiManager
 
 // led strip required includes
 #include <NeoPixelBus.h>
@@ -10,17 +11,13 @@
 #include <CapacitiveSensor.h>
 #include <MedianFilter.h>
 
-// wifi config
-#define WIFI_SSID "YOUR SSID"
-#define WIFI_PASS "YOUR WPA PASSWORD"
-
+// wifimanager for auto config
 WiFiClient client;
 
-//adafruit IPT config
-#define MQTT_SERV "io.adafruit.com"
-#define MQTT_PORT 1883
-#define MQTT_NAME "YOUR AIO USERNAME"
-#define MQTT_PASS "YOUR AIO KEY"
+// YOU NEED TO UPDATE YOUR USERNAME AND KEYS IN THIS FILE
+#include "conf.h"
+
+#define SENSOR_THRESHOLD 15
 
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERV, MQTT_PORT, MQTT_NAME, MQTT_PASS);
 Adafruit_MQTT_Subscribe timeout = Adafruit_MQTT_Subscribe(&mqtt, MQTT_NAME "/f/timeout");
@@ -40,9 +37,14 @@ RgbColor blue(0, 0, colorSaturation);
 RgbColor white(colorSaturation);
 RgbColor black(0);
 
+// wemos d1 mini = D0, D1, D2
+// NodeMCU V3 = D1, D5, D6
 // touch sensor config
 CapacitiveSensor capSensor1 = CapacitiveSensor(D0, D1);
 CapacitiveSensor capSensor2 = CapacitiveSensor(D0, D2);
+
+int rightRecentClick = 0;
+int leftRecentClick = 0;
 
 void setup()
 {
@@ -53,13 +55,14 @@ void setup()
   Serial.println("Initializing...");
   Serial.flush();
 
-  //Connect to WiFi
-  Serial.print("\n\nConnecting Wifi... ");
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-  }
+  // WiFiManager
+  // Local intialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
+  
+  // Uncomment and run it once, if you want to erase all the stored information
+  //wifiManager.resetSettings();
+
+  wifiManager.autoConnect("TimeoutTimer");
   Serial.println("WIFI connected");
 
   // this resets all the neopixels to an off state
@@ -106,8 +109,34 @@ void loop()
   {
     mqtt.disconnect();
   }
+  checkTap();
 }
 
+void checkTap(){
+  long sensorValue1 = capSensor1.capacitiveSensor(30);
+  long sensorValue2 = capSensor2.capacitiveSensor(30);
+
+  if(millis() - rightRecentClick > 300 && sensorValue1 > SENSOR_THRESHOLD){
+    rightRecentClick = millis();
+  }else if(millis() - rightRecentClick < 300 && sensorValue1 > SENSOR_THRESHOLD){
+    rightDblClick();
+  }
+  if(millis() - leftRecentClick > 300 && sensorValue2 > SENSOR_THRESHOLD){
+    leftRecentClick = millis();
+  }else if(millis() - leftRecentClick < 300 && sensorValue2 > SENSOR_THRESHOLD){
+    leftDblClick();
+  }
+}
+
+void rightDblClick() {
+  Serial.println("Right double detected");
+}
+
+void leftDblClick() {
+  Serial.println("Left double detected");
+}
+
+// should change the following function to work in a non-blocking manner 
 void countDown(uint16_t totalSeconds)
 {
   // convert seconds to millis
@@ -158,7 +187,7 @@ boolean isTouched(){
   Serial.println(sensorValue1);
   Serial.print("Sensor 2: ");
   Serial.println(sensorValue2);
-  if(sensorValue1 > 15 && sensorValue2 > 15) {
+  if(sensorValue1 > SENSOR_THRESHOLD && sensorValue2 > SENSOR_THRESHOLD) {
     return true;
   }
   return false;
